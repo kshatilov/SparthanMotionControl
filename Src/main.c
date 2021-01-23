@@ -55,6 +55,7 @@
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
+//#include "motor.c"
 
 /* USER CODE BEGIN Includes */
 
@@ -77,7 +78,7 @@ void MX_FREERTOS_Init(void);
 /* USER CODE END PFP */
 
 /* USER CODE BEGIN 0 */
-
+//extern SDADC_HandleTypeDef hsdadc1;
 /* USER CODE END 0 */
 
 /**
@@ -111,6 +112,7 @@ int main(void)
   MX_GPIO_Init();
   MX_DMA_Init();
   MX_SDADC1_Init();
+
   MX_TIM2_Init();
   MX_TIM3_Init();
   MX_TIM4_Init();
@@ -118,6 +120,7 @@ int main(void)
   MX_TIM12_Init();
   MX_TIM19_Init();
   MX_USART1_UART_Init();
+
   MX_TIM17_Init();
   MX_TIM16_Init();
   MX_TIM15_Init();
@@ -135,6 +138,7 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  
   while (1)
   {
 

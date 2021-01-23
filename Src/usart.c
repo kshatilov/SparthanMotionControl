@@ -49,17 +49,36 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "usart.h"
-
+#include "motor.h"
 #include "gpio.h"
 #include "dma.h"
 
 /* USER CODE BEGIN 0 */
 
-/* USER CODE END 0 */
+#include "cmsis_os.h"
+#include "task.h"
+#include <string.h>
+#include "CRC.c"
+
+uint8_t uartRxBuffer[RX_BUFFER_LENGTH];
+static uint8_t uartRxProcessingBuffer[RX_BUFFER_LENGTH];
+
+float motorPosCmd[5];
+
+static uint8_t sofPos	= 0;
+static uint8_t dataLength = 0;
+static uint8_t frameSeq = 0;
+uint8_t frameID = 0;
+
+osThreadId uartRxThreadHandle;
+osThreadId uartTxThreadHandle;
 
 UART_HandleTypeDef huart1;
 DMA_HandleTypeDef hdma_usart1_rx;
 DMA_HandleTypeDef hdma_usart1_tx;
+
+
+/* USER CODE END 0 */
 
 /* USART1 init function */
 
@@ -67,7 +86,7 @@ void MX_USART1_UART_Init(void)
 {
 
   huart1.Instance = USART1;
-  huart1.Init.BaudRate = 3000000;
+  huart1.Init.BaudRate = 500000;
   huart1.Init.WordLength = UART_WORDLENGTH_8B;
   huart1.Init.StopBits = UART_STOPBITS_1;
   huart1.Init.Parity = UART_PARITY_NONE;
@@ -80,7 +99,6 @@ void MX_USART1_UART_Init(void)
   {
     _Error_Handler(__FILE__, __LINE__);
   }
-
 }
 
 void HAL_UART_MspInit(UART_HandleTypeDef* uartHandle)
@@ -178,6 +196,108 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef* uartHandle)
 } 
 
 /* USER CODE BEGIN 1 */
+
+/* UART line idle detected, DMA UART receive operation has been stoped, restart now */
+
+/*
+void  HAL_UART_AbortReceiveCpltCallback (UART_HandleTypeDef *huart) {
+  //notify receiver thread there's new data
+ // osSignalSet(uartRxThreadHandle, UART_DATA_AVAILABLE);
+  //arm idle line interupt trigger
+  //UART_DMA_STOP_AT_IDLE(*huart);
+  //restart receiver
+  HAL_UART_Receive_DMA(huart, uartRxBuffer, sizeof(uartRxBuffer));
+
+}
+*/
+
+/* debug
+int count =0;
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+  count++;
+}
+*/
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+
+  memcpy(uartRxProcessingBuffer, uartRxBuffer, RX_BUFFER_LENGTH);
+
+    
+  for (sofPos = 0; sofPos < RX_BUFFER_LENGTH; sofPos++) {
+    if (uartRxProcessingBuffer[sofPos] == START_OF_FRAME) {
+      if (Verify_CRC8_Check_Sum(uartRxProcessingBuffer + sofPos, SIZE_FRAMEHEAD)) {
+        if (Verify_CRC16_Check_Sum(uartRxProcessingBuffer + sofPos, SIZE_FRAMEHEAD + 
+        SIZE_FRAMEID + SIZE_FRAMETAIL + (uartRxProcessingBuffer[OFFSET_DATA_LENGTH + sofPos] << 8 |
+        uartRxProcessingBuffer[OFFSET_DATA_LENGTH + sofPos + 1]))) {
+
+          dataLength = uartRxProcessingBuffer[OFFSET_DATA_LENGTH + sofPos] << 8 | 
+                       uartRxProcessingBuffer[OFFSET_DATA_LENGTH + sofPos + 1];
+       //   frameID = uartRxProcessingBuffer[OFFSET_DATA_TYPE + sofPos] << 8 | 
+       //             uartRxProcessingBuffer[OFFSET_DATA_TYPE + sofPos + 1];
+          frameSeq = uartRxProcessingBuffer[OFFSET_FRAME_SEQ];    
+
+          memcpy(motorPosCmd, uartRxProcessingBuffer + sofPos + OFFSET_DATA_PAC, 20);
+          break;
+        }
+      }
+    }
+  }
+//  hdma_usart1_rx.State = HAL_DMA_STATE_READY;
+}
+/*
+void uartSendBuffer(const float* data, uint16_t dataSize) {
+  uint16_t dataType = 0;
+  uint8_t txBuffer[64];
+  static uint8_t txCount = 0;
+  txCount++;
+  memset(txBuffer, 0, sizeof(txBuffer));
+  txBuffer[0] = START_OF_FRAME;
+  txBuffer[1] = (uint8_t) dataSize >> 8;
+  txBuffer[2] = (uint8_t) dataSize;
+  txBuffer[OFFSET_FRAME_SEQ] = txCount;
+  Append_CRC8_Check_Sum(txBuffer, SIZE_FRAMEHEAD);
+  txBuffer[5] = (uint8_t) dataType >> 8;
+  txBuffer[6] = (uint8_t) dataType;
+  uint16_t currentSize = OFFSET_DATA_TYPE + sizeof(uint16_t); //7
+  memcpy(txBuffer + currentSize, data, dataSize);
+  currentSize += dataSize;
+  Append_CRC16_Check_Sum(txBuffer, currentSize + SIZE_FRAMETAIL);
+  currentSize += 2;
+  HAL_UART_Transmit(&huart1, (uint8_t *) txBuffer, 64, 50); 
+}
+*/
+
+void uartSendBuffer(const float* data, uint16_t dataSize) {
+
+  uint8_t txBuffer[22];
+  memset(txBuffer, 0, sizeof(txBuffer)); // fill with zeros
+  txBuffer[0] = START_OF_FRAME;
+  memcpy(txBuffer + 1, data, dataSize);
+  txBuffer[21] = END_OF_FRAME; // append end of frame
+  HAL_UART_Transmit(&huart1, (uint8_t *) txBuffer, 22, 50);  // 18 bytes. 100 ms delay
+}
+
+
+void debugPrintLn(UART_HandleTypeDef *huart, char _out[]){
+       HAL_UART_Transmit_DMA(huart, (uint8_t *) _out, strlen(_out));
+       char newline[2] = "\r\n";
+       HAL_UART_Transmit_DMA(huart, (uint8_t *) newline, 2);
+}
+
+// uint8_t temp[5]; //debug
+void uartRxThreadFunction(void const * argument) {
+
+  while(1)
+  {
+  if (hdma_usart1_rx.State == HAL_DMA_STATE_READY) {
+    HAL_UART_Receive_DMA(&huart1, (uint8_t *) &uartRxBuffer, RX_BUFFER_LENGTH);
+  //  HAL_UART_Receive_DMA(&huart1, (uint8_t *) &temp, 5); // debug
+  //  hdma_usart1_rx.State = HAL_DMA_STATE_BUSY;
+  }
+  osDelay(100);
+  HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
+  }
+}
 
 /* USER CODE END 1 */
 

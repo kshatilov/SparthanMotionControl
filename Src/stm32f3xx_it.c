@@ -37,6 +37,7 @@
 #include "cmsis_os.h"
 
 /* USER CODE BEGIN 0 */
+#include <string.h>
 
 /* USER CODE END 0 */
 
@@ -203,13 +204,20 @@ void DMA1_Channel5_IRQHandler(void)
 * @brief This function handles USART1 global interrupt / USART1 wake-up interrupt through EXTI line 25.
 */
 void USART1_IRQHandler(void)
-{
+{   
   /* USER CODE BEGIN USART1_IRQn 0 */
 
+  /* Custom UART interupt handler to restart DMA after each data frame.
+  If DMA destination buffer data contains erroneous data during normal operation,
+  but stores correct data when a breakpoint is added on the DMAStop line,
+  slow down UART data rate. */
+ // if (READ_BIT(huart1.Instance->ISR, USART_ISR_IDLE)) {
+ //   HAL_UART_Abort_IT(&huart1);
+ // } else {
   /* USER CODE END USART1_IRQn 0 */
   HAL_UART_IRQHandler(&huart1);
   /* USER CODE BEGIN USART1_IRQn 1 */
-
+ // }
   /* USER CODE END USART1_IRQn 1 */
 }
 
